@@ -111,13 +111,17 @@ var STATIONS={
   essential:{name:'精选',service:'',nodes:['https://icecast.thisisdax.com/ClassicFM-M-Essential']},
   hof:{name:'名人堂',service:'',nodes:['https://icecast.thisisdax.com/ClassicFM-M-HOF']}
 };
-var LITE_NODE='https://media-the.musicradio.com/ClassicFM';
+var LITE_NODES=[
+  'https://media-sov.musicradio.com/ClassicFM',
+  'https://ice-sov.musicradio.com/ClassicFM',
+  'https://media-the.musicradio.com/ClassicFM'
+];
 var cur='main',quality='std',nodeIdx=0,audio=document.getElementById('audio'),
-    wantPlay=false,stallTimer=null,switching=false;
+    wantPlay=false,stallTimer=null,switching=false,lastProgress=0,watchTimer=null;
 var $=function(id){return document.getElementById(id)};
 
 function activeNodes(){
-  if(cur==='main'&&quality==='lite')return [LITE_NODE];
+  if(cur==='main'&&quality==='lite')return LITE_NODES;
   return STATIONS[cur].nodes;
 }
 function activeName(){
@@ -125,25 +129,39 @@ function activeName(){
 }
 function status(t,c){$('st').textContent=t;$('st').style.color=c||'#7ee0a8'}
 function clearStall(){if(stallTimer){clearTimeout(stallTimer);stallTimer=null}}
+
+/* 真正的卡顿检测：用 audio.currentTime 是否推进判断。
+   直播流 currentTime 会持续增长，卡住时停止。只有确认停滞才换线。 */
 function armStall(){
   clearStall();
+  lastProgress=audio.currentTime||0;
   stallTimer=setTimeout(function(){
-    if(wantPlay&&!switching){status('线路卡顿，自动换线…','#e8c77a');nextLine(true)}
-  },9000)
+    if(!wantPlay||switching)return;
+    var now=audio.currentTime||0;
+    if(now>lastProgress+0.5){return} /* 有推进，没卡 */
+    status('线路卡顿，自动换线…','#e8c77a');
+    nextLine(true);
+  },7000)
 }
+
 function playNode(){
   var nodes=activeNodes();
   if(nodeIdx>=nodes.length)nodeIdx=0;
   switching=false;
   var url=nodes[nodeIdx];
   status('连接中… '+activeName()+' 线路'+(nodeIdx+1)+'/'+nodes.length,'#e8c77a');
-  if(audio.src!==url){audio.src=url}
+  clearStall();
+  /* 强制重新加载：换线时必须 load()，否则浏览器可能沿用旧缓冲 */
+  audio.pause();
+  audio.src=url;
+  audio.load();
   var p;
   try{p=audio.play()}catch(e){p=Promise.reject(e)}
   if(p&&p.then){
     p.then(function(){
-      wantPlay=true;$('toggle').textContent='暂停';clearStall();armStall();
+      wantPlay=true;$('toggle').textContent='暂停';
       status('播放中 · '+activeName()+' 线路'+(nodeIdx+1)+'/'+nodes.length);
+      clearStall();armStall();
     }).catch(function(err){
       if(!wantPlay)return;
       status('播放失败：'+(err&&err.name||'Error')+'，点「换线」重试','#ff9a8b');
@@ -152,7 +170,11 @@ function playNode(){
 }
 function nextLine(auto){
   var nodes=activeNodes();
-  if(nodes.length<2){if(auto)status('该模式仅一条线路','#ff9a8b');return}
+  if(nodes.length<2){
+    if(auto){status('单条线路重连中…','#e8c77a');nodeIdx=0;if(wantPlay)playNode()}
+    else{status('该模式仅一条线路，可重试','#e8c77a');if(wantPlay)playNode()}
+    return;
+  }
   nodeIdx=(nodeIdx+1)%nodes.length;
   if(wantPlay){playNode()}else{status('已切到线路 '+(nodeIdx+1)+'/'+nodes.length)}
 }
@@ -234,14 +256,25 @@ $('toggle').addEventListener('click',function(){
   else{wantPlay=true;$('toggle').textContent='暂停';playNode()}
 });
 $('switchLine').addEventListener('click',function(){nextLine(false)});
+/* 播放有推进：刷新进度并撤销卡顿计时，不主动换线 */
+audio.addEventListener('timeupdate',function(){
+  lastProgress=audio.currentTime||0;
+  if(wantPlay&&audio.readyState>=3&&$('st').textContent.indexOf('缓冲')>=0){
+    status('播放中 · '+activeName());
+  }
+});
 audio.addEventListener('playing',function(){
-  wantPlay=true;$('toggle').textContent='暂停';clearStall();armStall()
+  wantPlay=true;$('toggle').textContent='暂停';clearStall();
 });
 audio.addEventListener('pause',function(){
   if(!wantPlay)$('toggle').textContent='播放';clearStall()
 });
-audio.addEventListener('waiting',function(){if(wantPlay){status('缓冲中…','#e8c77a');armStall()}});
-audio.addEventListener('stalled',function(){if(wantPlay)armStall()});
+audio.addEventListener('waiting',function(){
+  if(wantPlay){status('缓冲中…','#e8c77a');armStall()}
+});
+audio.addEventListener('stalled',function(){
+  if(wantPlay&&!stallTimer)armStall()
+});
 audio.addEventListener('error',function(){
   if(!wantPlay)return;
   status('线路失败，换线重试…','#ff9a8b');
