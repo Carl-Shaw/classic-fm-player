@@ -23,6 +23,12 @@ background:linear-gradient(90deg,#e8c77a,#f6e7b8,#e8c77a);-webkit-background-cli
 background:rgba(255,255,255,.05);color:#dfe6ea;font-size:13px;cursor:pointer;transition:.2s;white-space:nowrap}
 .tab:hover{background:rgba(255,255,255,.12)}
 .tab.active{border-color:#e8c77a;background:rgba(232,199,122,.15);color:#f6e7b8;font-weight:600}
+.quality{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.quality .lbl{font-size:11px;color:#7d8b95}
+.qbtn{padding:5px 14px;border:1px solid rgba(255,255,255,.15);border-radius:14px;
+background:rgba(255,255,255,.05);color:#cfd8de;font-size:12px;cursor:pointer;transition:.2s}
+.qbtn.on{border-color:#7ee0a8;background:rgba(126,224,168,.12);color:#7ee0a8;font-weight:600}
+.qbtn:disabled{opacity:.35;cursor:not-allowed}
 .track{display:flex;align-items:center;gap:15px;padding:16px;background:rgba(0,0,0,.25);
 border-radius:14px;margin-bottom:14px;min-height:88px}
 .cover{width:60px;height:60px;border-radius:10px;background:rgba(255,255,255,.08) center/cover;
@@ -62,6 +68,13 @@ audio{display:none}
     <div class="tab" data-id="movies">Movies</div>
   </div>
 
+  <div class="quality">
+    <span class="lbl">音质</span>
+    <button class="qbtn on" id="qStd">标准</button>
+    <button class="qbtn" id="qLite">省流 · 仅电脑</button>
+    <span class="lbl" id="qNote">标准 128kbps，全平台可用</span>
+  </div>
+
   <div class="track">
     <div class="cover" id="cover">♪</div>
     <div class="info">
@@ -79,18 +92,24 @@ audio{display:none}
     <div class="vol"><input type="range" id="vol" min="0" max="1" step="0.05" value="0.8"></div>
   </div>
   <div class="st" id="st"></div>
-  <div class="tip">已锁定稳定 MP3 线路，128kbps · 断线自动重连，不会自动跳线 · 若持续不通可手动换线</div>
+  <div class="tip">省流 48kbps 仅电脑可用，手机请保持标准 · 断线自动重连，不会自动跳线 · 持续不通可手动换线</div>
 </div>
 
 <audio id="audio" preload="none"></audio>
 <script>
-/* 三个频道均为 128kbps MP3，安卓手机可正常播放。默认锁定第一条，失败只重连不自动跳线。 */
+/* 标准档为 128kbps MP3，全平台可播。省流档为 48kbps HE-AAC，仅电脑解码器支持。
+   默认锁定第一条线，失败只重连不自动跳线。 */
 var STATIONS={
   main:{name:'主频道',nodes:[
     'https://media-ice.musicradio.com/ClassicFMMP3',
     'https://media-sov.musicradio.com/ClassicFMMP3',
     'https://ice-sov.musicradio.com/ClassicFMMP3',
     'https://media-ssl.musicradio.com/ClassicFMMP3'
+  ],lite:[
+    'https://media-sov.musicradio.com/ClassicFM',
+    'https://icecast.thisisdax.com/ClassicFM',
+    'https://media-the.musicradio.com/ClassicFM',
+    'https://ice-sov.musicradio.com/ClassicFM'
   ]},
   calm:{name:'Calm',nodes:[
     'https://media-ice.musicradio.com/ClassicFMCalmMP3',
@@ -105,12 +124,14 @@ var STATIONS={
     'https://media-ssl.musicradio.com/ClassicFMMoviesMP3'
   ]}
 };
-var cur='main',nodeIdx=0,audio=document.getElementById('audio'),
+var isMobile=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+var cur='main',liteMode=false,nodeIdx=0,audio=document.getElementById('audio'),
     wantPlay=false,retryCount=0,switching=false;
 var $=function(id){return document.getElementById(id)};
 
-function nodes(){return STATIONS[cur].nodes}
-function nameNow(){return STATIONS[cur].name}
+function useLite(){return liteMode&&cur==='main'&&!isMobile}
+function nodes(){return useLite()?STATIONS.main.lite:STATIONS[cur].nodes}
+function nameNow(){var n=STATIONS[cur].name;if(useLite())n+='·省流';return n}
 function status(t,c){$('st').textContent=t;$('st').style.color=c||'#7ee0a8'}
 
 function loadNode(isSwitch){
@@ -146,6 +167,7 @@ function onFail(msg){
 
 function setStation(id){
   var was=wantPlay;cur=id;nodeIdx=0;retryCount=0;
+  updateQualityUI();
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.dataset.id===id)});
   if(was){switching=true;loadNode(false)}else{
     try{audio.src=nodes()[0]}catch(e){}
@@ -155,6 +177,28 @@ function setStation(id){
 document.querySelectorAll('.tab').forEach(function(t){
   t.addEventListener('click',function(){setStation(t.dataset.id)})
 });
+
+function updateQualityUI(){
+  $('qStd').classList.toggle('on',!liteMode);
+  $('qLite').classList.toggle('on',liteMode&&!isMobile);
+  var canLite=!isMobile&&cur==='main';
+  $('qLite').disabled=!canLite;
+  if(isMobile){
+    $('qNote').textContent='省流仅电脑可用，手机请保持标准';
+  }else if(cur!=='main'){
+    $('qNote').textContent='省流仅主频道可用';
+  }else{
+    $('qNote').textContent=liteMode?'省流 48kbps，网络卡时更稳':'标准 128kbps，全平台可用';
+  }
+}
+function setLite(on){
+  if(on&&isMobile)return;
+  liteMode=on;nodeIdx=0;retryCount=0;
+  updateQualityUI();
+  if(wantPlay){switching=true;loadNode(false)}else{status('已选 '+nameNow())}
+}
+$('qStd').addEventListener('click',function(){setLite(false)});
+$('qLite').addEventListener('click',function(){if(!isMobile&&cur==='main')setLite(true)});
 
 /* ===== 曲目：Official Global Player WebSocket ===== */
 var WS_URL='wss://metadata.musicradio.com/v2/now-playing';
@@ -227,6 +271,7 @@ audio.addEventListener('waiting',function(){
 });
 $('vol').addEventListener('input',function(){audio.volume=this.value});
 audio.volume=0.8;
+updateQualityUI();
 </script>
 </body>
 </html>
