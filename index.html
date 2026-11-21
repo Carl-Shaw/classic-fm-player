@@ -23,12 +23,6 @@ background:linear-gradient(90deg,#e8c77a,#f6e7b8,#e8c77a);-webkit-background-cli
 background:rgba(255,255,255,.05);color:#dfe6ea;font-size:13px;cursor:pointer;transition:.2s;white-space:nowrap}
 .tab:hover{background:rgba(255,255,255,.12)}
 .tab.active{border-color:#e8c77a;background:rgba(232,199,122,.15);color:#f6e7b8;font-weight:600}
-.quality{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:16px}
-.quality .lbl{font-size:11px;color:#7d8b95}
-.qbtn{padding:5px 14px;border:1px solid rgba(255,255,255,.15);border-radius:14px;
-background:rgba(255,255,255,.05);color:#cfd8de;font-size:12px;cursor:pointer;transition:.2s}
-.qbtn.on{border-color:#7ee0a8;background:rgba(126,224,168,.12);color:#7ee0a8;font-weight:600}
-.qbtn:disabled{opacity:.35;cursor:not-allowed}
 .track{display:flex;align-items:center;gap:15px;padding:16px;background:rgba(0,0,0,.25);
 border-radius:14px;margin-bottom:14px;min-height:88px}
 .cover{width:60px;height:60px;border-radius:10px;background:rgba(255,255,255,.08) center/cover;
@@ -59,22 +53,13 @@ audio{display:none}
 </head>
 <body>
 <div class="player">
-  <div class="brand"><h1>CLASSIC FM</h1><p>频道切换 · 实时曲目 · 多线备份</p></div>
+  <div class="brand"><h1>CLASSIC FM</h1><p>频道切换 · 实时曲目 · 稳定单线</p></div>
 
   <div class="sechead">选择频道</div>
   <div class="tabs" id="tabs">
     <div class="tab active" data-id="main">主频道</div>
     <div class="tab" data-id="calm">Calm</div>
     <div class="tab" data-id="movies">Movies</div>
-    <div class="tab" data-id="essential">精选</div>
-    <div class="tab" data-id="hof">名人堂</div>
-  </div>
-
-  <div class="quality">
-    <span class="lbl">音质</span>
-    <button class="qbtn on" id="qStd">标准</button>
-    <button class="qbtn" id="qLite">省流</button>
-    <span class="lbl" id="qNote">省流仅主频道 · 约48kbps</span>
   </div>
 
   <div class="track">
@@ -94,64 +79,46 @@ audio{display:none}
     <div class="vol"><input type="range" id="vol" min="0" max="1" step="0.05" value="0.8"></div>
   </div>
   <div class="st" id="st"></div>
-  <div class="tip">省流是主频道的低码率版本，更省流量 · 抖动时先重试当前线路，不会乱跳 · 也可手动换线</div>
+  <div class="tip">已锁定稳定 MP3 线路，128kbps · 断线自动重连，不会自动跳线 · 若持续不通可手动换线</div>
 </div>
 
 <audio id="audio" preload="none"></audio>
 <script>
-/* 所有节点均实测可用。同流不同机房互为备份。 */
+/* 三个频道均为 128kbps MP3，安卓手机可正常播放。默认锁定第一条，失败只重连不自动跳线。 */
 var STATIONS={
-  main:{name:'主频道',service:'121',nodes:[
+  main:{name:'主频道',nodes:[
+    'https://media-ice.musicradio.com/ClassicFMMP3',
     'https://media-sov.musicradio.com/ClassicFMMP3',
     'https://ice-sov.musicradio.com/ClassicFMMP3',
-    'https://media-ssl.musicradio.com/ClassicFMMP3',
-    'https://media-ice.musicradio.com/ClassicFMMP3'
-  ],lite:[
-    'https://media-the.musicradio.com/ClassicFM',
-    'https://ice-the.musicradio.com/ClassicFM',
-    'https://media-sov.musicradio.com/ClassicFM',
-    'https://ice-sov.musicradio.com/ClassicFM'
+    'https://media-ssl.musicradio.com/ClassicFMMP3'
   ]},
-  calm:{name:'Calm',service:'',nodes:[
-    'https://media-sov.musicradio.com/ClassicFMCalmMP3',
+  calm:{name:'Calm',nodes:[
     'https://media-ice.musicradio.com/ClassicFMCalmMP3',
+    'https://media-sov.musicradio.com/ClassicFMCalmMP3',
     'https://ice-sov.musicradio.com/ClassicFMCalmMP3',
     'https://media-ssl.musicradio.com/ClassicFMCalmMP3'
   ]},
-  movies:{name:'Movies',service:'',nodes:[
-    'https://media-sov.musicradio.com/ClassicFMMoviesMP3',
+  movies:{name:'Movies',nodes:[
     'https://media-ice.musicradio.com/ClassicFMMoviesMP3',
+    'https://media-sov.musicradio.com/ClassicFMMoviesMP3',
     'https://ice-sov.musicradio.com/ClassicFMMoviesMP3',
     'https://media-ssl.musicradio.com/ClassicFMMoviesMP3'
-  ]},
-  essential:{name:'精选',service:'',nodes:[
-    'https://media-sov.musicradio.com/ClassicFM-M-Essential',
-    'https://media-ice.musicradio.com/ClassicFM-M-Essential',
-    'https://ice-sov.musicradio.com/ClassicFM-M-Essential',
-    'https://media-ssl.musicradio.com/ClassicFM-M-Essential'
-  ]},
-  hof:{name:'名人堂',service:'',nodes:[
-    'https://media-sov.musicradio.com/ClassicFM-M-HOF',
-    'https://media-ice.musicradio.com/ClassicFM-M-HOF',
-    'https://ice-sov.musicradio.com/ClassicFM-M-HOF',
-    'https://media-ssl.musicradio.com/ClassicFM-M-HOF'
   ]}
 };
-var cur='main',liteMode=false,nodeIdx=0,audio=document.getElementById('audio'),
-    wantPlay=false,failCount=0,lastSwitch=0,switching=false;
+var cur='main',nodeIdx=0,audio=document.getElementById('audio'),
+    wantPlay=false,retryCount=0,switching=false;
 var $=function(id){return document.getElementById(id)};
 
-function useLite(){return liteMode&&cur==='main'}
-function nodes(){return useLite()?STATIONS.main.lite:STATIONS[cur].nodes}
-function nameNow(){var n=STATIONS[cur].name;if(useLite())n+='·省流';return n}
+function nodes(){return STATIONS[cur].nodes}
+function nameNow(){return STATIONS[cur].name}
 function status(t,c){$('st').textContent=t;$('st').style.color=c||'#7ee0a8'}
 
-function loadNode(changeLine){
+function loadNode(isSwitch){
   var ns=nodes();
   if(nodeIdx>=ns.length)nodeIdx=0;
   var url=ns[nodeIdx];
   switching=false;
-  status((changeLine?'换线重连…':'连接中…')+' '+nameNow()+' 线路'+(nodeIdx+1)+'/'+ns.length,'#e8c77a');
+  status((isSwitch?'换线重连…':'连接中…')+' '+nameNow()+' 线路'+(nodeIdx+1)+'/'+ns.length,'#e8c77a');
   try{audio.pause()}catch(e){}
   audio.src=url;
   audio.load();
@@ -164,28 +131,21 @@ function loadNode(changeLine){
   }
 }
 
-/* 失败处理：先重试当前线路2次，仍失败才换下一条，避免抖动就乱跳 */
+/* 失败处理：只重连当前线路，绝不自动换线。连续失败后停下等待用户手动换线。 */
 function onFail(msg){
   if(!wantPlay)return;
-  failCount++;
-  if(failCount<=2){
-    status(msg+'，重试当前线路 '+failCount+'/2…','#e8c77a');
+  retryCount++;
+  if(retryCount<=4){
+    status(msg+'，重连中 '+retryCount+'/4…','#e8c77a');
     switching=true;
-    setTimeout(function(){if(wantPlay)loadNode(false)},1200);
+    setTimeout(function(){if(wantPlay)loadNode(false)},1500);
   }else{
-    var ns=nodes();
-    var now=Date.now();
-    if(now-lastSwitch<8000){status(msg+'，稍后重试…','#ff9a8b');return}
-    if(ns.length<2){status(msg+'，仅一条线路，请稍候重试','#ff9a8b');return}
-    lastSwitch=now;failCount=0;nodeIdx=(nodeIdx+1)%ns.length;
-    status(msg+'，换下一条线路…','#ff9a8b');
-    loadNode(true);
+    status(msg+'，已连不上这条线路，请点「换线」手动切换','#ff9a8b');
   }
 }
 
 function setStation(id){
-  var was=wantPlay;cur=id;nodeIdx=0;failCount=0;lastSwitch=0;
-  updateQualityUI();
+  var was=wantPlay;cur=id;nodeIdx=0;retryCount=0;
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.dataset.id===id)});
   if(was){switching=true;loadNode(false)}else{
     try{audio.src=nodes()[0]}catch(e){}
@@ -195,21 +155,6 @@ function setStation(id){
 document.querySelectorAll('.tab').forEach(function(t){
   t.addEventListener('click',function(){setStation(t.dataset.id)})
 });
-
-function updateQualityUI(){
-  $('qStd').classList.toggle('on',!liteMode);
-  $('qLite').classList.toggle('on',liteMode);
-  var ok=cur==='main';
-  $('qLite').disabled=!ok;
-  $('qNote').textContent=!ok?'省流仅主频道可用':(liteMode?'省流约48kbps，更省流量':'标准约128kbps');
-}
-function setLite(on){
-  liteMode=on;nodeIdx=0;failCount=0;lastSwitch=0;
-  updateQualityUI();
-  if(wantPlay){switching=true;loadNode(false)}else{status('已选 '+nameNow())}
-}
-$('qStd').addEventListener('click',function(){setLite(false)});
-$('qLite').addEventListener('click',function(){if(cur==='main')setLite(true)});
 
 /* ===== 曲目：Official Global Player WebSocket ===== */
 var WS_URL='wss://metadata.musicradio.com/v2/now-playing';
@@ -259,15 +204,15 @@ connectWS();
 
 $('toggle').addEventListener('click',function(){
   if(wantPlay){wantPlay=false;audio.pause();$('toggle').textContent='播放';status('已暂停')}
-  else{wantPlay=true;failCount=0;lastSwitch=0;$('toggle').textContent='暂停';loadNode(false)}
+  else{wantPlay=true;retryCount=0;$('toggle').textContent='暂停';loadNode(false)}
 });
 $('switchLine').addEventListener('click',function(){
-  var ns=nodes();nodeIdx=(nodeIdx+1)%ns.length;failCount=0;lastSwitch=Date.now();
+  var ns=nodes();nodeIdx=(nodeIdx+1)%ns.length;retryCount=0;
   if(wantPlay){loadNode(true)}else{status('已切到线路 '+(nodeIdx+1)+'/'+ns.length)}
 });
 
 audio.addEventListener('playing',function(){
-  wantPlay=true;failCount=0;$('toggle').textContent='暂停';
+  wantPlay=true;retryCount=0;$('toggle').textContent='暂停';
   status('播放中 · '+nameNow()+' 线路'+(nodeIdx+1)+'/'+nodes().length);
 });
 audio.addEventListener('pause',function(){
@@ -282,7 +227,6 @@ audio.addEventListener('waiting',function(){
 });
 $('vol').addEventListener('input',function(){audio.volume=this.value});
 audio.volume=0.8;
-updateQualityUI();
 </script>
 </body>
 </html>
