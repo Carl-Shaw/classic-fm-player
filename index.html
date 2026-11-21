@@ -71,10 +71,10 @@ audio{display:none}
   </div>
 
   <div class="quality">
-    <span class="lbl">线路</span>
-    <button class="qbtn on" id="qAuto">自动</button>
-    <button class="qbtn" id="qFixed">单线</button>
-    <span class="lbl" id="qNote">自动=失败才换线</span>
+    <span class="lbl">音质</span>
+    <button class="qbtn on" id="qStd">标准</button>
+    <button class="qbtn" id="qLite">省流</button>
+    <span class="lbl" id="qNote">省流仅主频道 · 约48kbps</span>
   </div>
 
   <div class="track">
@@ -94,18 +94,23 @@ audio{display:none}
     <div class="vol"><input type="range" id="vol" min="0" max="1" step="0.05" value="0.8"></div>
   </div>
   <div class="st" id="st"></div>
-  <div class="tip">自动模式仅在播放失败时换线，不会反复跳 · 偶尔缓冲属正常，等它自己恢复 · 换线可手动点</div>
+  <div class="tip">省流是主频道的低码率版本，更省流量 · 抖动时先重试当前线路，不会乱跳 · 也可手动换线</div>
 </div>
 
 <audio id="audio" preload="none"></audio>
 <script>
-/* 所有节点均实测可用。同流不同机房做备份，每个频道配4条。 */
+/* 所有节点均实测可用。同流不同机房互为备份。 */
 var STATIONS={
   main:{name:'主频道',service:'121',nodes:[
     'https://media-sov.musicradio.com/ClassicFMMP3',
     'https://ice-sov.musicradio.com/ClassicFMMP3',
     'https://media-ssl.musicradio.com/ClassicFMMP3',
     'https://media-ice.musicradio.com/ClassicFMMP3'
+  ],lite:[
+    'https://media-the.musicradio.com/ClassicFM',
+    'https://ice-the.musicradio.com/ClassicFM',
+    'https://media-sov.musicradio.com/ClassicFM',
+    'https://ice-sov.musicradio.com/ClassicFM'
   ]},
   calm:{name:'Calm',service:'',nodes:[
     'https://media-sov.musicradio.com/ClassicFMCalmMP3',
@@ -132,51 +137,57 @@ var STATIONS={
     'https://media-ssl.musicradio.com/ClassicFM-M-HOF'
   ]}
 };
-var cur='main',autoMode=true,nodeIdx=0,audio=document.getElementById('audio'),
-    wantPlay=false,switching=false,lastSwitch=0,playingOk=false;
+var cur='main',liteMode=false,nodeIdx=0,audio=document.getElementById('audio'),
+    wantPlay=false,failCount=0,lastSwitch=0,switching=false;
 var $=function(id){return document.getElementById(id)};
 
-function nodes(){return STATIONS[cur].nodes}
-function nameNow(){return STATIONS[cur].name+(autoMode?'':'·单线')}
+function useLite(){return liteMode&&cur==='main'}
+function nodes(){return useLite()?STATIONS.main.lite:STATIONS[cur].nodes}
+function nameNow(){var n=STATIONS[cur].name;if(useLite())n+='·省流';return n}
 function status(t,c){$('st').textContent=t;$('st').style.color=c||'#7ee0a8'}
 
-function playNode(){
+function loadNode(changeLine){
   var ns=nodes();
   if(nodeIdx>=ns.length)nodeIdx=0;
   var url=ns[nodeIdx];
-  switching=false;playingOk=false;
-  status('连接中… '+nameNow()+' 线路'+(nodeIdx+1)+'/'+ns.length,'#e8c77a');
+  switching=false;
+  status((changeLine?'换线重连…':'连接中…')+' '+nameNow()+' 线路'+(nodeIdx+1)+'/'+ns.length,'#e8c77a');
   try{audio.pause()}catch(e){}
   audio.src=url;
   audio.load();
   var p;try{p=audio.play()}catch(e){p=Promise.reject(e)}
   if(p&&p.then){
-    p.then(function(){
-      wantPlay=true;$('toggle').textContent='暂停';playingOk=true;
-      status('播放中 · '+nameNow()+' 线路'+(nodeIdx+1)+'/'+ns.length);
-    }).catch(function(err){
+    p.catch(function(err){
       if(!wantPlay||switching)return;
-      status('线路播放失败：'+(err&&err.name||'Error')+'，点「换线」重试','#ff9a8b');
+      onFail('播放失败 '+(err&&err.name||'Error'));
     });
   }
 }
 
-/* 换线：只在明确失败或用户手动时调用，带冷却，绝不自动循环 */
-function switchLine(auto){
-  var ns=nodes();
-  var now=Date.now();
-  if(auto&&now-lastSwitch<15000)return;
-  if(ns.length<2){if(auto){status('仅一条线路，无法自动换','#ff9a8b')}return}
-  lastSwitch=now;
-  nodeIdx=(nodeIdx+1)%ns.length;
-  if(wantPlay){playNode()}
-  else{status('已切到线路 '+(nodeIdx+1)+'/'+ns.length)}
+/* 失败处理：先重试当前线路2次，仍失败才换下一条，避免抖动就乱跳 */
+function onFail(msg){
+  if(!wantPlay)return;
+  failCount++;
+  if(failCount<=2){
+    status(msg+'，重试当前线路 '+failCount+'/2…','#e8c77a');
+    switching=true;
+    setTimeout(function(){if(wantPlay)loadNode(false)},1200);
+  }else{
+    var ns=nodes();
+    var now=Date.now();
+    if(now-lastSwitch<8000){status(msg+'，稍后重试…','#ff9a8b');return}
+    if(ns.length<2){status(msg+'，仅一条线路，请稍候重试','#ff9a8b');return}
+    lastSwitch=now;failCount=0;nodeIdx=(nodeIdx+1)%ns.length;
+    status(msg+'，换下一条线路…','#ff9a8b');
+    loadNode(true);
+  }
 }
 
 function setStation(id){
-  var was=wantPlay;cur=id;nodeIdx=0;lastSwitch=0;playingOk=false;
+  var was=wantPlay;cur=id;nodeIdx=0;failCount=0;lastSwitch=0;
+  updateQualityUI();
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.dataset.id===id)});
-  if(was){playNode()}else{
+  if(was){switching=true;loadNode(false)}else{
     try{audio.src=nodes()[0]}catch(e){}
     status('已选 '+nameNow());
   }
@@ -185,15 +196,20 @@ document.querySelectorAll('.tab').forEach(function(t){
   t.addEventListener('click',function(){setStation(t.dataset.id)})
 });
 
-function setMode(auto){
-  autoMode=auto;nodeIdx=0;lastSwitch=0;
-  $('qAuto').classList.toggle('on',auto);
-  $('qFixed').classList.toggle('on',!auto);
-  $('qNote').textContent=auto?'自动=失败才换线':'固定单条线路';
-  if(wantPlay){playNode()}else{status('已选 '+nameNow())}
+function updateQualityUI(){
+  $('qStd').classList.toggle('on',!liteMode);
+  $('qLite').classList.toggle('on',liteMode);
+  var ok=cur==='main';
+  $('qLite').disabled=!ok;
+  $('qNote').textContent=!ok?'省流仅主频道可用':(liteMode?'省流约48kbps，更省流量':'标准约128kbps');
 }
-$('qAuto').addEventListener('click',function(){setMode(true)});
-$('qFixed').addEventListener('click',function(){setMode(false)});
+function setLite(on){
+  liteMode=on;nodeIdx=0;failCount=0;lastSwitch=0;
+  updateQualityUI();
+  if(wantPlay){switching=true;loadNode(false)}else{status('已选 '+nameNow())}
+}
+$('qStd').addEventListener('click',function(){setLite(false)});
+$('qLite').addEventListener('click',function(){if(cur==='main')setLite(true)});
 
 /* ===== 曲目：Official Global Player WebSocket ===== */
 var WS_URL='wss://metadata.musicradio.com/v2/now-playing';
@@ -243,31 +259,30 @@ connectWS();
 
 $('toggle').addEventListener('click',function(){
   if(wantPlay){wantPlay=false;audio.pause();$('toggle').textContent='播放';status('已暂停')}
-  else{wantPlay=true;lastSwitch=0;$('toggle').textContent='暂停';playNode()}
+  else{wantPlay=true;failCount=0;lastSwitch=0;$('toggle').textContent='暂停';loadNode(false)}
 });
-$('switchLine').addEventListener('click',function(){switchLine(false)});
+$('switchLine').addEventListener('click',function(){
+  var ns=nodes();nodeIdx=(nodeIdx+1)%ns.length;failCount=0;lastSwitch=Date.now();
+  if(wantPlay){loadNode(true)}else{status('已切到线路 '+(nodeIdx+1)+'/'+ns.length)}
+});
 
-/* 只有明确的加载错误才自动换一次线，有冷却，不循环 */
-audio.addEventListener('error',function(){
-  if(!wantPlay)return;
-  status('线路失败，自动换线…','#ff9a8b');
-  switchLine(true);
-});
 audio.addEventListener('playing',function(){
-  wantPlay=true;playingOk=true;$('toggle').textContent='暂停';
+  wantPlay=true;failCount=0;$('toggle').textContent='暂停';
+  status('播放中 · '+nameNow()+' 线路'+(nodeIdx+1)+'/'+nodes().length);
 });
 audio.addEventListener('pause',function(){
   if(!wantPlay)$('toggle').textContent='播放';
 });
-/* 缓冲/等待只提示，不换线，让它自己恢复 */
-audio.addEventListener('waiting',function(){
-  if(wantPlay)status('缓冲中，请稍候…','#e8c77a');
+audio.addEventListener('error',function(){
+  if(!wantPlay||switching)return;
+  onFail('线路出错');
 });
-audio.addEventListener('stalled',function(){
-  if(wantPlay&&!playingOk)status('连接较慢，请稍候…','#e8c77a');
+audio.addEventListener('waiting',function(){
+  if(wantPlay&&!switching)status('缓冲中，请稍候…','#e8c77a');
 });
 $('vol').addEventListener('input',function(){audio.volume=this.value});
 audio.volume=0.8;
+updateQualityUI();
 </script>
 </body>
 </html>
